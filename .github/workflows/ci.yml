@@ -1,12 +1,59 @@
 name: CI
 
+# Trusted same-repo events (push, same-repo PRs) run on the macOS arm64
+# self-hosted runner registered to this repository with the label mfs.
+# Fork PRs stay on GitHub-hosted runners only: never schedule untrusted code
+# on the self-hosted machine. Runner setup and security: docs/SelfHostedRunner.md
+
 on:
   push:
     branches: ["main", "master"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    if: >
+      github.repository == 'donaldfilimon/mfs' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: [self-hosted, macOS, ARM64, mfs]
+    steps:
+      # v4 rather than the hosted job's v3: v3 targets the end-of-life
+      # Node 16 runtime (actionlint rejects it), and a freshly installed
+      # runner should not depend on the runner remapping it.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Zig 0.12.0
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.12.0
+
+      - name: Print Zig version & environment
+        run: |
+          zig version
+          zig env
+
+      - name: Check formatting
+        run: zig fmt --check .
+
+      - name: Build (debug)
+        run: zig build
+
+      - name: Run tests
+        run: zig build test
+
+  build-hosted:
+    name: build (GitHub-hosted, fork PRs)
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
